@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
+// TODO: Handle disappearing and reappearing of nodes during warping
+
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -34,7 +36,7 @@ function createStarfield() {
 }
 
 // Node system
-interface Node {
+interface Node_representation {
     mesh: THREE.Mesh;
     position: THREE.Vector3;
     targetPosition: THREE.Vector3; // New target position for warping
@@ -44,8 +46,8 @@ interface Node {
     isWarping: boolean; // Track if node is currently warping
 }
 
-const nodes: Node[] = [];
-let currentAnchor: Node | null = null;
+const nodes: Node_representation[] = [];
+let currentAnchor: Node_representation | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const space = 50; // Define the cubic space size
@@ -82,7 +84,7 @@ function createNodes() {
         mesh.position.copy(position);
         scene.add(mesh);
         
-        const node: Node = {
+        const node: Node_representation = {
             mesh,
             position,
             targetPosition: position.clone(), // Initially same as current position
@@ -137,7 +139,7 @@ function getAnimationPhase(elapsed: number): { phase: string, progress: number, 
 }
 
 // Placeholder with random positions
-function generateNewEmbeddingPositions(anchorNode: Node): void {
+function generateNewEmbeddingPositions(anchorNode: Node_representation): void {
     nodes.forEach(node => {
         if (node === anchorNode) {
             node.targetPosition.set(0, 0, 0);
@@ -156,7 +158,7 @@ function generateNewEmbeddingPositions(anchorNode: Node): void {
     });
 }
 
-function startSpaceWarp(anchorNode: Node): void {
+function startSpaceWarp(anchorNode: Node_representation): void {
     generateNewEmbeddingPositions(anchorNode);
     
     // Store controls target positions for smooth interpolation
@@ -263,7 +265,7 @@ function onMouseClick(event: MouseEvent) {
 }
 
 // Set a node as the anchor
-function setAnchor(node: Node) {
+function setAnchor(node: Node_representation) {
     if (currentAnchor) {
         currentAnchor.isAnchor = false;
         currentAnchor.mesh.material = normalNodeMaterial.clone();
@@ -312,7 +314,7 @@ function onMouseMove(event: MouseEvent) {
     }
 }
 
-function onNodeAnchorSet(node: Node) {
+function onNodeAnchorSet(node: Node_representation) {
     // (TODO) Implement additional features for the anchored node
 
     console.log(`Anchor set! You can now implement additional features for node: ${node.id}`);
