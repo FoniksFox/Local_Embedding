@@ -37,14 +37,28 @@ function createStarfield() {
 interface Node {
     mesh: THREE.Mesh;
     position: THREE.Vector3;
+    targetPosition: THREE.Vector3; // New target position for warping
+    originalPosition: THREE.Vector3; // Store original position
     id: string;
     isAnchor: boolean;
+    isWarping: boolean; // Track if node is currently warping
 }
 
 const nodes: Node[] = [];
 let currentAnchor: Node | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+
+// Warping animation parameters
+const PULLBACK_DURATION = 1000; // Pullback phase
+const RELEASE_DURATION = 500; // Quick release/snap
+const EASE_OUT_DURATION = 4000; // Long ease out to appreciate the result
+const TOTAL_WARP_DURATION = PULLBACK_DURATION + RELEASE_DURATION + EASE_OUT_DURATION;
+
+let warpStartTime: number = 0;
+let isSpaceWarping: boolean = false;
+let controlsStartTarget: THREE.Vector3 = new THREE.Vector3();
+let controlsTargetTarget: THREE.Vector3 = new THREE.Vector3();
 
 // Different materials for development and testing
 const normalNodeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -70,16 +84,164 @@ function createNodes() {
         const node: Node = {
             mesh,
             position,
+            targetPosition: position.clone(), // Initially same as current position
+            originalPosition: position.clone(), // Store original for reset
             id: `node-${i}`,
-            isAnchor: false
+            isAnchor: false,
+            isWarping: false
         };
         
         nodes.push(node);
     }
 }
 
+
+
+function easeInOutCubic(t: number): number {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function easeOutQuart(t: number): number {
+    return 1 - Math.pow(1 - t, 4);
+}
+
+// Get the appropriate easing and progress for current animation phase
+function getAnimationPhase(elapsed: number): { phase: string, progress: number, easedProgress: number } {
+    if (elapsed < PULLBACK_DURATION) {
+        // Phase 1: Pullback - smooth buildup
+        const progress = elapsed / PULLBACK_DURATION;
+        return {
+            phase: 'pullback',
+            progress,
+            easedProgress: easeInOutCubic(progress)
+        };
+    } else if (elapsed < PULLBACK_DURATION + RELEASE_DURATION) {
+        // Phase 2: Release (arrow fired) - linear for smooth transition
+        const progress = (elapsed - PULLBACK_DURATION) / RELEASE_DURATION;
+        controlsStartTarget.copy(controls.target);
+        return {
+            phase: 'release',
+            progress,
+            easedProgress: progress
+        };
+    } else {
+        // Phase 3: Ease out - appreciate the result
+        const progress = Math.min((elapsed - PULLBACK_DURATION - RELEASE_DURATION) / EASE_OUT_DURATION, 1);
+        return {
+            phase: 'easeout',
+            progress,
+            easedProgress: easeOutQuart(progress)
+        };
+    }
+}
+
+// Placeholder with random positions
+function generateNewEmbeddingPositions(anchorNode: Node): void {
+    nodes.forEach(node => {
+        if (node === anchorNode) {
+            node.targetPosition.set(0, 0, 0);
+        } else {
+            const distance = Math.random() * 8 + 2;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = (Math.random() - 0.5) * Math.PI;
+            
+            node.targetPosition.set(
+                distance * Math.cos(phi) * Math.cos(theta),
+                distance * Math.sin(phi),
+                distance * Math.cos(phi) * Math.sin(theta)
+            );
+        }
+        node.isWarping = true;
+    });
+}
+
+function startSpaceWarp(anchorNode: Node): void {
+    generateNewEmbeddingPositions(anchorNode);
+    
+    // Store controls target positions for smooth interpolation
+    controlsStartTarget.copy(controls.target);
+    controlsTargetTarget.copy(anchorNode.position);
+    
+    warpStartTime = performance.now();
+    isSpaceWarping = true;
+    console.log('Space warping started...');
+}
+
+function updateWarpingAnimation(): void {
+    if (!isSpaceWarping || !currentAnchor) return;
+    
+    const currentTime = performance.now();
+    const elapsed = currentTime - warpStartTime;
+    const { phase, progress, easedProgress } = getAnimationPhase(elapsed);
+    controlsTargetTarget.copy(currentAnchor.position);
+    
+    // Calculate continuous progress values across all phases
+    let nodeProgress = 0;
+    let controlsProgress = 0;
+    
+    if (phase === 'pullback') {
+        // During pullback, controls target pulls back from anchor (bow tension)
+        controlsProgress = -easedProgress * 5; // Pull back 500% from target
+    } else if (phase === 'release') {
+        nodeProgress = easedProgress * 0.7;
+        // During release, controls target snaps toward anchor
+        controlsProgress = easedProgress * 0.8; // Move to 80% toward target
+    } else if (phase === 'easeout') {
+        nodeProgress = 0.7 + (easedProgress * 0.3);
+        // During ease-out, controls target completes the transition
+        controlsProgress = 0.8 + (easedProgress * 0.2); // Complete to 100%
+    }
+    
+    // Handle different phases - no camera movement, user controls camera
+    if (phase === 'pullback') {
+        console.log(`Pullback phase: ${(progress * 100).toFixed(1)}%`);
+    } else if (phase === 'release') {
+        console.log(`Release phase: ${(progress * 100).toFixed(1)}%`);
+    } else if (phase === 'easeout') {
+        console.log(`Ease out phase: ${(progress * 100).toFixed(1)}%`);
+    }
+    
+    // Apply the continuous node progress to all warping nodes
+    nodes.forEach(node => {
+        if (node.isWarping) {
+            node.position.lerpVectors(node.originalPosition, node.targetPosition, nodeProgress);
+            node.mesh.position.copy(node.position);
+            
+            if (phase === 'easeout' && progress >= 1) {
+                node.isWarping = false;
+                node.originalPosition.copy(node.position);
+            }
+        }
+    });
+    
+    // Smoothly interpolate the controls target for bow and arrow effect
+    const newTarget = new THREE.Vector3();
+    newTarget.lerpVectors(controlsStartTarget, controlsTargetTarget, controlsProgress);
+    const diff = newTarget.clone().sub(controls.target);
+    camera.position.add(diff); // Move camera along with target
+    controls.target.copy(newTarget);
+    controls.update();
+    
+    // Check if animation is complete
+    if (elapsed >= TOTAL_WARP_DURATION) {
+        isSpaceWarping = false;
+        console.log('Space warp complete!');
+
+        // Ensure all nodes are in their final positions
+        nodes.forEach(node => {
+            if (node.isWarping) {
+                node.position.copy(node.targetPosition);
+                node.mesh.position.copy(node.position);
+                node.isWarping = false;
+                node.originalPosition.copy(node.position);
+            }
+        });
+    }
+}
+
 // Handle mouse clicks
 function onMouseClick(event: MouseEvent) {
+    if (isSpaceWarping) return; // Ignore clicks during warping animation
     // Normalize mouse coordinates
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -110,12 +272,10 @@ function setAnchor(node: Node) {
     node.mesh.material = anchorNodeMaterial.clone();
     currentAnchor = node;
     
-    // Update orbit controls to focus on the anchor
-    controls.target.copy(node.position);
-    camera.position.set(node.position.x, node.position.y, node.position.z + 5); // Reset camera position, should be adjusted
-    controls.update();
-    
     console.log(`Node ${node.id} set as anchor at position:`, node.position);
+    
+    // Start the bow and arrow space warping animation
+    startSpaceWarp(node);
     
     onNodeAnchorSet(node);
 }
@@ -176,6 +336,7 @@ window.addEventListener('resize', onWindowResize);
 
 function animate() {
     controls.update();
+    updateWarpingAnimation();
     renderer.render(scene, camera);
 }
 
