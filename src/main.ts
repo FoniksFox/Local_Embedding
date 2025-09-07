@@ -48,6 +48,7 @@ const nodes: Node[] = [];
 let currentAnchor: Node | null = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+const space = 50; // Define the cubic space size
 
 // Warping animation parameters
 const PULLBACK_DURATION = 1000; // Pullback phase
@@ -70,11 +71,11 @@ function createNodes() {
     const nodeGeometry = new THREE.SphereGeometry(0.15, 16, 16);
     
     // Create some randomly positioned nodes for testing
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 500; i++) {
         const position = new THREE.Vector3(
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 10
+            (Math.random() - 0.5) * space,
+            (Math.random() - 0.5) * space,
+            (Math.random() - 0.5) * space
         );
         
         const mesh = new THREE.Mesh(nodeGeometry, normalNodeMaterial.clone());
@@ -141,7 +142,7 @@ function generateNewEmbeddingPositions(anchorNode: Node): void {
         if (node === anchorNode) {
             node.targetPosition.set(0, 0, 0);
         } else {
-            const distance = Math.random() * 8 + 2;
+            const distance = Math.random() * (space - 2) + 2; // Ensure a minimum distance from anchor
             const theta = Math.random() * Math.PI * 2;
             const phi = (Math.random() - 0.5) * Math.PI;
             
